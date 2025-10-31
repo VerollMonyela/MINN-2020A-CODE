@@ -527,5 +527,124 @@ nds "base.html" %}
 {% endif %}
 {% endblock %}
 '''
+minerals_html = '''
+{% extends "base.html" %}
+{% block title %}Minerals Database - African Critical Minerals Tracker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-database me-2"></i>Critical Minerals Database</h1>
+    <span class="badge bg-primary fs-6">{{ minerals|length }} Records</span>
+</div>
 
+<p class="lead mb-4">Comprehensive information on African critical minerals including production statistics, export values, and market prices.</p>
+
+<div class="row">
+    {% for mineral in minerals %}
+    <div class="col-lg-6 mb-4">
+        <div class="card feature-card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">{{ mineral.name }}</h5>
+                <span class="badge bg-success">{{ mineral.price }}</span>
+            </div>
+            <div class="card-body">
+                <p class="card-text">{{ mineral.description }}</p>
+                <div class="row">
+                    <div class="col-6">
+                        <strong><i class="fas fa-globe-africa me-1"></i>Country:</strong><br>
+                        <span class="text-primary">{{ mineral.country }}</span>
+                    </div>
+                    <div class="col-6">
+                        <strong><i class="fas fa-calendar me-1"></i>Year:</strong><br>
+                        {{ mineral.year }}
+                    </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-6">
+                        <strong><i class="fas fa-industry me-1"></i>Production:</strong><br>
+                        <span class="text-success">{{ mineral.production }} tonnes</span>
+                    </div>
+                    <div class="col-6">
+                        <strong><i class="fas fa-dollar-sign me-1"></i>Export Value:</strong><br>
+                        <span class="text-warning">{{ mineral.export_value }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <a href="{{ url_for('source_code') }}" class="btn btn-outline-secondary" target="_blank">
+                    <i class="fas fa-code me-1"></i>View Application Source Code
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+'''
+minerals_html = '''
+{% extends "base.html" %}
+{% block title %}Minerals Database - African Critical Minerals Tracker{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-database me-2"></i>Critical Minerals Database</h1>
+    <span class="badge bg-primary fs-6">{{ minerals|length }} Records</span>
+</div>
+
+<p class="lead mb-4">Comprehensive information on African critical minerals including production statistics, export values, and market prices.</p>
+
+<div class="row">
+    {% for mineral in minerals %}
+    <div class="col-lg-6 mb-4">
+        <div class="card feature-card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">{{ mineral.name }}</h5>
+                <span class="badge bg-success">{{ mineral.price }}</span>
+            </div>
+            <div class="card-body">
+                <p class="card-text">{{ mineral.description }}</p>
+                <div class="row">
+                    <div class="col-6">
+                        <strong><i class="fas fa-globe-africa me-1"></i>Country:</strong><br>
+                        <span class="text-primary">{{ mineral.country }}</span>
+                    </div>
+                    <div class="col-6">
+                        <strong><i class="fas fa-calendar me-1"></i>Year:</strong><br>
+                        {{ mineral.year }}
+                    </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-6">
+                        <strong><i class="fas fa-industry me-1"></i>Production:</strong><br>
+                        <span class="text-success">{{ mineral.production }} tonnes</span>
+                    </div>
+                    <div class="col-6">
+                        <strong><i class="fas fa-dollar-sign me-1"></i>Export Value:</strong><br>
+                        <span class="text-warning">{{ mineral.export_value }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <a href="{{ url_for('source_code') }}" class="btn btn-outline-secondary" target="_blank">
+                    <i class="fas fa-code me-1"></i>View Application Source Code
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+'''
 
