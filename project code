@@ -1,0 +1,531 @@
+import os
+import secrets
+import webbrowser
+import threading
+import time
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from werkzeug.security import generate_password_hash, check_password_hash
+import pandas as pd
+import folium
+import plotly
+import plotly.graph_objs as go
+from functools import wraps
+import json
+
+app = Flask(__name__)
+app.secret_key = "african-minerals-secret-key-2025"
+
+# Ensure directories exist
+os.makedirs("data", exist_ok=True)
+os.makedirs(os.path.join("static", "maps"), exist_ok=True)
+os.makedirs("templates", exist_ok=True)
+
+# -------------------- CSV Data Creation --------------------
+def create_data_files():
+    """Create all required CSV files with the provided data"""
+    
+    # Countries data
+    countries_data = """CountryID,CountryName,GDP_BillionUSD,MiningRevenue_BillionUSD,KeyProjects,Region
+1,DRC (Congo),55,12,Cobalt expansion in Kolwezi,Central Africa
+2,South Africa,350,25,Bushveld Lithium Project,Southern Africa
+3,Mozambique,20,4,Balama Graphite Project,Southern Africa
+4,Namibia,15,3,Otjozondu Manganese Project,Southern Africa
+5,Zambia,25,6,Copperbelt expansion,Southern Africa
+6,Zimbabwe,28,5,Sandawana Lithium Mine,Southern Africa
+7,Morocco,130,3,Cobalt processing plant,North Africa
+8,Ghana,75,8,Bauxite mining expansion,West Africa"""
+    
+    # Minerals data
+minerals_data = """MineralID,MineralName,Description,MarketPriceUSD_per_tonne
+1,Cobalt,Used in lithium-ion batteries for EVs and energy storage,52000
+2,Lithium,Essential component for electric vehicle batteries,70000
+3,Graphite,Anode material for lithium-ion batteries and industrial lubricants,800
+4,Manganese,Critical for steel production and battery cathodes,2200
+5,Platinum,PGM for catalytic converters and hydrogen fuel cells,32000
+6,Copper,Essential for electrical wiring and renewable energy systems,8500
+7,Nickel,Used in lithium-ion batteries and stainless steel,18000
+8,Chromium,Essential for stainless steel production,12000"""
+    
+    # Roles data
+    roles_data = """RoleID,RoleName
+1,Administrator
+2,Investor
+3,Researcher"""
+    
+    # Production stats
+    production_data = """ProductionID,Year,CountryID,MineralID,Production_tonnes,ExportValue_BillionUSD
+1,2023,1,1,100000,5.2
+2,2023,2,2,120000,8.4
+3,2023,3,3,50000,0.9
+4,2023,4,4,200000,2.7
+5,2023,5,6,800000,6.8
+6,2023,6,2,25000,1.75
+7,2023,7,1,15000,0.78
+8,2023,8,5,5000,0.16
+9,2024,1,1,110000,6.0
+10,2024,2,2,130000,9.1
+11,2024,3,3,55000,1.1
+12,2024,4,4,210000,3.0
+13,2024,5,6,850000,7.2
+14,2024,6,2,28000,2.1"""
+    
+    # Sites data
+    sites_data = """SiteID,SiteName,CountryID,MineralID,Latitude,Longitude,Production_tonnes
+1,Kolwezi Cobalt Mine,1,1,-10.7167,25.4667,100000
+2,Bushveld Lithium Project,2,2,-25.7667,27.7500,120000
+3,Balama Graphite Mine,3,3,-13.3333,38.7667,50000
+4,Kalahari Manganese Field,4,4,-27.0833,22.9500,200000
+5,Copperbelt Mine,5,6,-12.8233,28.1976,800000
+6,Sandawana Lithium Mine,6,2,-20.2667,30.0833,25000
+7,Atlas Cobalt Project,7,1,31.7917,-7.0926,15000
+8,Awaso Bauxite Mine,8,5,6.3000,-2.3833,5000"""
+    
+    # Write files
+    files = {
+        'countries.csv': countries_data,
+        'minerals.csv': minerals_data,
+        'roles.csv': roles_data,
+        'production_stats.csv': production_data,
+        'sites.csv': sites_data
+    }
+ 
+    for filename, data in files.items():
+        filepath = os.path.join("data", filename)
+        if not os.path.exists(filepath):
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(data)
+            print(f"Created {filepath}")
+
+    # Create users with EXACT passwords as specified
+    users_file = os.path.join("data", "users.csv")
+    if not os.path.exists(users_file):
+        users_data = pd.DataFrame([
+            {
+                "UserID": 1,
+                "Username": "admin01",
+                "PasswordHash": generate_password_hash("hash123"),
+                "RoleID": 1,
+                "Email": "admin01@chronominerals.com"
+            },
+            {
+                "UserID": 2,
+                "Username": "investor01", 
+                "PasswordHash": generate_password_hash("hash456"),
+                "RoleID": 2,
+                "Email": "investor01@chronominerals.com"
+            },
+            {
+                "UserID": 3,
+                "Username": "research01",
+                "PasswordHash": generate_password_hash("hash789"),
+                "RoleID": 3,
+                "Email": "research01@wits.ac.za"
+            }
+        ])
+        users_data.to_csv(users_file, index=False)
+        print(f"Created {users_file}")
+
+# Create data files on startup
+create_data_files()
+
+# -------------------- Utility Functions --------------------
+def load_csv(filename):
+    """Load csv from data folder into pandas DataFrame."""
+    filepath = os.path.join("data", filename)
+    if os.path.exists(filepath):
+        try:
+            return pd.read_csv(filepath)
+        except Exception as e:
+            print(f"Failed to read {filepath}: {e}")
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def save_csv(df, filename):
+    """Save DataFrame to CSV in data folder."""
+    filepath = os.path.join("data", filename)
+    df.to_csv(filepath, index=False)
+
+# -------------------- Decorators --------------------
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'username' not in session:
+            flash("Please log in to access this page.", "warning")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'username' not in session or session.get('role') != 'Administrator':
+            flash("Administrator access required.", "danger")
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+create_data_files()
+
+# -------------------- Utility Functions --------------------
+def load_csv(filename):
+    """Load csv from data folder into pandas DataFrame."""
+    filepath = os.path.join("data", filename)
+    if os.path.exists(filepath):
+        try:
+            return pd.read_csv(filepath)
+        except Exception as e:
+            print(f"Failed to read {filepath}: {e}")
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def save_csv(df, filename):
+    """Save DataFrame to CSV in data folder."""
+    filepath = os.path.join("data", filename)
+    df.to_csv(filepath, index=False)
+
+# -------------------- Decorators --------------------
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'username' not in session:
+            flash("Please log in to access this page.", "warning")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'username' not in session or session.get('role') != 'Administrator':
+            flash("Administrator access required.", "danger")
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+urn decorated
+
+# -------------------- HTML Templates --------------------
+base_html = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}African Critical Minerals Tracker{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .navbar-brand { font-weight: bold; color: #2c3e50 !important; }
+        .hero-section { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 60px 0; }
+        .feature-card { transition: transform 0.3s; border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .feature-card:hover { transform: translateY(-5px); }
+        .mineral-badge { font-size: 0.8em; padding: 5px 10px; margin: 2px; }
+        .welcome-user { color: #2c3e50; font-weight: 500; }
+        .source-code-link { border: 1px solid #6c757d; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="fas fa-gem me-2"></i>Chrono Minerals Tracker
+            </a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                {% if session.username %}
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+ <i class="fas fa-tachometer-alt me-1"></i>Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('minerals') }}">
+                            <i class="fas fa-database me-1"></i>Minerals Database
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('minerals_map') }}">
+                            <i class="fas fa-map-marked-alt me-1"></i>Interactive Map
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('charts') }}">
+                            <i class="fas fa-chart-bar me-1"></i>Analytics
+                        </a>
+                    </li>
+                    {% if session.role == 'Administrator' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_users') }}">
+                            <i class="fas fa-users-cog me-1"></i>User Management
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <span class="welcome-user me-3">
+                            <i class="fas fa-user me-1"></i>{{ session.username }} ({{ session.role }})
+                        </span>
+                    </li>
+                    <li class="nav-item">
+                        <a class="btn btn-outline-secondary btn-sm source-code-link me-2" href="{{ url_for('source_code') }}" target="_blank">
+ <i class="fas fa-code me-1"></i>View Source Code
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="btn btn-outline-danger btn-sm" href="{{ url_for('logout') }}">
+                            <i class="fas fa-sign-out-alt me-1"></i>Logout
+                        </a>
+                    </li>
+                </ul>
+                {% else %}
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('login') }}">Login</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('signup') }}">Sign Up</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('source_code') }}" target="_blank">
+                            <i class="fas fa-code me-1"></i>Source Code
+                        </a>
+                    </li>
+                </ul>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+ {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
+'''
+
+login_html = '''
+{% extends "base.html" %}
+{% block title %}Login - African Critical Minerals Tracker{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <div class="card feature-card">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0"><i class="fas fa-sign-in-alt me-2"></i>Login</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" name="username" required placeholder="Enter your username">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" name="password" required placeholder="Enter your password">
+                    </div>
+<button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-sign-in-alt me-1"></i>Login
+                    </button>
+                </form>
+                
+                <div class="mt-4 p-3 bg-light rounded">
+                    <h6><i class="fas fa-info-circle me-1"></i>Test Accounts:</h6>
+                    <div class="small">
+                        <strong>Admin:</strong> admin01 / hash123<br>
+                        <strong>Investor:</strong> investor01 / hash456<br>
+                        <strong>Researcher:</strong> research01 / hash789
+                    </div>
+                </div>
+                
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('source_code') }}" class="btn btn-outline-secondary btn-sm" target="_blank">
+                        <i class="fas fa-code me-1"></i>View Source Code
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+'''
+
+signup_html = '''
+{% extends "base.html" %}
+{% block title %}Sign Up - African Critical Minerals Tracker{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card feature-card">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0"><i class="fas fa-user-plus me-2"></i>Sign Up</h4>
+            </div>
+            <div class="card-body">
+ <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" name="password" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role</label>
+                        <select class="form-select" name="role" required>
+                            <option value="">Select a role</option>
+                            <option value="Administrator">Administrator</option>
+                            <option value="Investor">Investor</option>
+                            <option value="Researcher">Researcher</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="fas fa-user-plus me-1"></i>Create Account
+                    </button>
+                </form>
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('login') }}">Already have an account? Login here</a>
+                </div>
+                <div class="text-center mt-2">
+                    <a href="{{ url_for('source_code') }}" class="btn btn-outline-secondary btn-sm" target="_blank">
+                        <i class="fas fa-code me-1"></i>View Source Code
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+'''
+
+dashboard_html = '''
+nds "base.html" %}
+{% block title %}Dashboard - African Critical Minerals Tracker{% endblock %}
+{% block content %}
+<div class="hero-section rounded mb-4">
+    <div class="container text-center">
+        <h1 class="display-4 fw-bold">African Critical Minerals Tracker</h1>
+        <p class="lead">Comprehensive data platform for strategic mineral intelligence across Africa</p>
+        <p class="mb-0">Welcome, <strong>{{ session.username }}</strong> | Role: <strong>{{ session.role }}</strong></p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary feature-card">
+            <div class="card-body text-center">
+                <i class="fas fa-gem fa-3x mb-3"></i>
+                <h3>{{ total_minerals }}</h3>
+                <p class="mb-0">Critical Minerals</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success feature-card">
+            <div class="card-body text-center">
+                <i class="fas fa-globe-africa fa-3x mb-3"></i>
+                <h3>{{ total_countries }}</h3>
+                <p class="mb-0">African Countries</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning feature-card">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-line fa-3x mb-3"></i>
+ <h3>{{ "%.1f"|format(total_production/1000000) }}M</h3>
+                <p class="mb-0">Total Production (tons)</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info feature-card">
+            <div class="card-body text-center">
+                <i class="fas fa-database fa-3x mb-3"></i>
+                <h3>{{ total_countries * total_minerals }}</h3>
+                <p class="mb-0">Data Points</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <i class="fas fa-database fa-2x text-primary mb-3"></i>
+                <h5>Minerals Database</h5>
+                <p>Comprehensive information on critical minerals including cobalt, lithium, and manganese</p>
+                <a href="{{ url_for('minerals') }}" class="btn btn-primary">Explore Database</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <i class="fas fa-map-marked-alt fa-2x text-success mb-3"></i>
+                <h5>Interactive Map</h5>
+                <p>Geospatial visualization of mining sites and mineral deposits across Africa</p>
+ <a href="{{ url_for('minerals_map') }}" class="btn btn-success">View Map</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-bar fa-2x text-info mb-3"></i>
+                <h5>Data Analytics</h5>
+                <p>Interactive charts and trends analysis for production and market data</p>
+                <a href="{{ url_for('charts') }}" class="btn btn-info">View Analytics</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card feature-card">
+            <div class="card-body text-center">
+                <h5><i class="fas fa-code me-2"></i>Development</h5>
+                <p>Access the complete source code for this application</p>
+                <a href="{{ url_for('source_code') }}" class="btn btn-outline-dark" target="_blank">
+                    <i class="fas fa-external-link-alt me-1"></i>View Full Source Code
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% if session.role == 'Administrator' %}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card feature-card">
+            <div class="card-body">
+                <h5><i class="fas fa-users-cog me-2"></i>Administrator Tools</h5>
+                <p>Manage users and system configuration</p>
+                <a href="{{ url_for('admin_users') }}" class="btn btn-warning">
+                    <i class="fas fa-cog me-1"></i>User Management
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+'''
+
+
