@@ -914,3 +914,319 @@ function copyToClipboard() {
 </script>
 {% endblock %}
 '''
+# -------------------- Template Writing --------------------
+def create_templates():
+    """Create all HTML template files"""
+    templates = {
+        'base.html': base_html,
+        'login.html': login_html,
+        'signup.html': signup_html,
+        'dashboard.html': dashboard_html,
+        'minerals.html': minerals_html,
+        'map.html': map_html,
+        'charts.html': charts_html,
+        'admin_users.html': admin_users_html,
+        'source_code.html': source_code_html,
+    }
+    
+    for filename, content in templates.items():
+        filepath = os.path.join("templates", filename)
+        if not os.path.exists(filepath):
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"Created template: {filepath}")
+
+create_templates()
+
+# -------------------- Auto-open browser function --------------------
+def open_browser():
+    """Wait for the server to start and then open the browser automatically"""
+    time.sleep(2)  # Wait 2 seconds for the server to start
+    webbrowser.open_new('http://127.0.0.1:5000')
+
+# -------------------- Routes --------------------
+@app.route('/')
+def home():
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+
+        users_df = load_csv('users.csv')
+        user_row = users_df[users_df['Username'] == username]
+        
+        if not user_row.empty and check_password_hash(user_row.iloc[0]['PasswordHash'], password):
+            session['username'] = username
+            role_id = user_row.iloc[0]['RoleID']
+            
+            # Get role name
+            roles_df = load_csv('roles.csv')
+            role_name = roles_df[roles_df['RoleID'] == role_id]['RoleName'].iloc[0]
+            session['role'] = role_name
+            
+            flash(f"Welcome back, {username}!", "success")
+            return redirect(url_for('dashboard'))
+        else:
+            flash("Invalid username or password", "danger")
+    
+    return render_template('login.html')
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        role_name = request.form.get('role', '')
+
+        users_df = load_csv('users.csv')
+        if username in users_df['Username'].values:
+            flash("Username already exists! Please choose another.", "warning")
+            return redirect(url_for('signup'))
+
+        roles_df = load_csv('roles.csv')
+        role_id = roles_df[roles_df['RoleName'] == role_name]['RoleID'].iloc[0]
+        
+        new_user = pd.DataFrame([{
+            "UserID": len(users_df) + 1,
+            "Username": username,
+            "PasswordHash": generate_password_hash(password),
+            "RoleID": role_id,
+            "Email": f"{username}@chronominerals.com"
+        }])
+        
+        users_df = pd.concat([users_df, new_user], ignore_index=True)
+        save_csv(users_df, 'users.csv')
+        
+        flash("Registration successful! Please login with your new account.", "success")
+        return redirect(url_for('login'))
+    
+    return render_template('signup.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash("You have been logged out successfully.", "info")
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    # Load some stats for the dashboard
+    minerals_df = load_csv('minerals.csv')
+    countries_df = load_csv('countries.csv')
+    production_df = load_csv('production_stats.csv')
+    
+    total_minerals = len(minerals_df)
+    total_countries = len(countries_df)
+    total_production = production_df['Production_tonnes'].sum()
+    
+    return render_template('dashboard.html', 
+                         total_minerals=total_minerals, 
+                         total_countries=total_countries, 
+                         total_production=total_production)
+
+@app.route('/minerals')
+@login_required
+def minerals():
+    minerals_df = load_csv('minerals.csv')
+    countries_df = load_csv('countries.csv')
+    production_df = load_csv('production_stats.csv')
+
+    # Merge data to get comprehensive mineral information
+    merged = production_df.merge(minerals_df, on='MineralID').merge(countries_df, on='CountryID')
+    
+    minerals_list = []
+    for _, row in merged.iterrows():
+        minerals_list.append({
+            "name": row['MineralName'],
+            "description": row['Description'],
+            "country": row['CountryName'],
+            "year": row['Year'],
+            "production": f"{row['Production_tonnes']:,}",
+            "export_value": f"${row['ExportValue_BillionUSD']}B",
+            "price": f"${row['MarketPriceUSD_per_tonne']:,.0f}/ton"
+        })
+
+    return render_template('minerals.html', minerals=minerals_list)
+
+@app.route('/minerals_map')
+@login_required
+def minerals_map():
+    sites_df = load_csv('sites.csv')
+    minerals_df = load_csv('minerals.csv')
+    countries_df = load_csv('countries.csv')
+
+    # Create map centered on Africa
+    m = folium.Map(location=[-8, 20], zoom_start=4, tiles='CartoDB positron')
+    
+    # Add markers for each mining site
+    for _, site in sites_df.iterrows():
+        mineral_name = minerals_df[minerals_df['MineralID'] == site['MineralID']]['MineralName'].iloc[0]
+        country_name = countries_df[countries_df['CountryID'] == site['CountryID']]['CountryName'].iloc[0]
+        mineral_price = minerals_df[minerals_df['MineralID'] == site['MineralID']]['MarketPriceUSD_per_tonne'].iloc[0]
+        
+        # Calculate estimated market value
+        market_value = site['Production_tonnes'] * mineral_price
+        
+        popup_html = f"""
+        <div style="width: 250px;">
+            <h5><b>{site['SiteName']}</b></h5>
+            <hr>
+            <p><b>Mineral:</b> {mineral_name}</p>
+            <p><b>Country:</b> {country_name}</p>
+            <p><b>Production:</b> {site['Production_tonnes']:,} tonnes</p>
+            <p><b>Market Value:</b> ${market_value:,.0f}</p>
+            <p><b>Price/ton:</b> ${mineral_price:,.0f}</p>
+        </div>
+        """
+        
+        # Color code markers by mineral type
+        color_map = {
+            'Cobalt': 'blue',
+            'Lithium': 'green', 
+            'Graphite': 'black',
+            'Manganese': 'orange',
+            'Platinum': 'purple',
+            'Copper': 'red',
+            'Nickel': 'gray',
+            'Chromium': 'darkred'
+        }
+        
+        folium.Marker(
+            [site['Latitude'], site['Longitude']],
+            popup=folium.Popup(popup_html, max_width=300),
+            tooltip=f"{mineral_name} - {site['SiteName']}",
+            icon=folium.Icon(color=color_map.get(mineral_name, 'blue'), icon='info-sign')
+        ).add_to(m)
+    
+    # Save map
+    map_path = 'static/maps/minerals_map.html'
+    m.save(map_path)
+    
+    return render_template('map.html')
+
+@app.route('/charts')
+@login_required
+def charts():
+    production_df = load_csv('production_stats.csv')
+    countries_df = load_csv('countries.csv')
+    minerals_df = load_csv('minerals.csv')
+    
+    # Merge data
+    merged = production_df.merge(countries_df, on='CountryID').merge(minerals_df, on='MineralID')
+    
+    # Chart 1: Production by Country
+    country_production = merged.groupby('CountryName')['Production_tonnes'].sum().sort_values(ascending=False)
+    
+    trace1 = go.Bar(
+        x=country_production.index,
+        y=country_production.values,
+        name='Production (tonnes)',
+        marker_color='rgb(55, 83, 109)'
+    )
+    
+    layout1 = go.Layout(
+        title='Total Mineral Production by Country',
+        xaxis_title='Country',
+        yaxis_title='Production (tonnes)',
+        height=400
+    )
+    
+    fig1 = go.Figure(data=[trace1], layout=layout1)
+    graph1JSON = json.dumps(fig1, cls=plotly.utils.PlotlyJSONEncoder)
+    
+    # Chart 2: Export Value by Mineral
+    mineral_exports = merged.groupby('MineralName')['ExportValue_BillionUSD'].sum().sort_values(ascending=False)
+    
+    trace2 = go.Pie(
+        labels=mineral_exports.index,
+        values=mineral_exports.values,
+        name='Export Value'
+    )
+    
+    layout2 = go.Layout(
+        title='Export Value Distribution by Mineral',
+        height=400
+    )
+    
+    fig2 = go.Figure(data=[trace2], layout=layout2)
+    graph2JSON = json.dumps(fig2, cls=plotly.utils.PlotlyJSONEncoder)
+    
+    return render_template('charts.html', graph1JSON=graph1JSON, graph2JSON=graph2JSON)
+
+@app.route('/admin/users')
+@admin_required
+def admin_users():
+    users_df = load_csv('users.csv')
+    roles_df = load_csv('roles.csv')
+    
+    users_with_roles = users_df.merge(roles_df, on='RoleID')
+    
+    return render_template('admin_users.html', users=users_with_roles.to_dict('records'))
+
+@app.route('/admin/reset/<username>', methods=['POST'])
+@admin_required
+def admin_reset_password(username):
+    users_df = load_csv('users.csv')
+    
+    if username in users_df['Username'].values:
+        new_password = secrets.token_urlsafe(8)  # Generate random password
+        users_df.loc[users_df['Username'] == username, 'PasswordHash'] = generate_password_hash(new_password)
+        save_csv(users_df, 'users.csv')
+        flash(f"Password reset for {username}. New password: {new_password}", "success")
+    else:
+        flash("User not found", "danger")
+    
+    return redirect(url_for('admin_users'))
+
+@app.route('/source_code')
+def source_code():
+    """Display the complete source code"""
+    # Read the current Python file
+    current_file = __file__
+    with open(current_file, 'r', encoding='utf-8') as f:
+        source_code = f.read()
+    
+    return render_template('source_code.html', source_code=source_code)
+
+@app.route('/download_code')
+def download_code():
+    """Download the Python source code as a file"""
+    current_file = __file__
+    return send_file(current_file, as_attachment=True, download_name='african_minerals_tracker.py')
+
+# Add the missing import for send_file
+from flask import send_file
+
+if __name__ == '__main__':
+    print("=" * 70)
+    print("AFRICAN CRITICAL MINERALS TRACKER")
+    print("=" * 70)
+    print("Starting application...")
+    print("Data files initialized successfully!")
+    print("Application will open automatically in your browser...")
+    print("")
+    print("TEST ACCOUNTS:")
+    print("   Administrator: admin01 / hash123")
+    print("   Investor:      investor01 / hash456") 
+    print("   Researcher:    research01 / hash789")
+    print("")
+    print("FEATURES:")
+    print("   Role-Based Access Control")
+    print("   Minerals Database")
+    print("   Interactive Map")
+    print("   Data Analytics & Charts")
+    print("   Country Profiles")
+    print("   User Management (Admin only)")
+    print("   View Source Code")
+    print("   Download Python File")
+    print("=" * 70)
+    
+    # Start the browser automatically
+    threading.Timer(1.5, open_browser).start()
+    
+    # Run the app
+    app.run(debug=True, host='127.0.0.1', port=5000, use_reloader=False)
